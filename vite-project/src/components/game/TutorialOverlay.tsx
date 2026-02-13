@@ -69,10 +69,14 @@ export const TutorialOverlay = ({ isOpen, onClose, onComplete }: TutorialOverlay
         {/* Header */}
         <div className="bg-primary/10 p-6 text-center relative">
           <button 
+            type="button"
+            aria-label="Close tutorial"
+            title="Close tutorial"
             onClick={onClose}
             className="absolute top-3 right-3 p-2 hover:bg-background/50 rounded-full transition-colors"
           >
             <X className="w-5 h-5 text-muted-foreground" />
+          
           </button>
           
           <div className="flex justify-center mb-3">
