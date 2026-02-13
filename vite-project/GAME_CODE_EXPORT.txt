@@ -1,0 +1,2174 @@
+================================================================================
+AFRICAN MARBLE GAME - COMPLETE CODE EXPORT
+For SwiftUI Conversion
+================================================================================
+
+================================================================================
+FILE: src/App.tsx
+================================================================================
+
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import HomePage from "./pages/HomePage";
+import Level1Page from "./pages/Level1Page";
+import Level2Page from "./pages/Level2Page";
+import NotFound from "./pages/NotFound";
+
+const queryClient = new QueryClient();
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/level/1" element={<Level1Page />} />
+          <Route path="/level/2" element={<Level2Page />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;
+
+================================================================================
+FILE: src/store/gameStore.ts
+================================================================================
+
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+export interface GameProgress {
+  marbleCount: number;
+  level1Completions: number;
+  level2Completions: number;
+  level3Completions: number;
+  totalMarblesWon: number;
+  totalMarblesLost: number;
+  totalShots: number;
+}
+
+interface GameStore extends GameProgress {
+  addMarbles: (count: number) => void;
+  removeMarbles: (count: number) => void;
+  recordShot: () => void;
+  completeLevel: (level: 1 | 2 | 3) => void;
+  recordWin: (marbles: number) => void;
+  recordLoss: (marbles: number) => void;
+  resetProgress: () => void;
+}
+
+const initialState: GameProgress = {
+  marbleCount: 0,
+  level1Completions: 0,
+  level2Completions: 0,
+  level3Completions: 0,
+  totalMarblesWon: 0,
+  totalMarblesLost: 0,
+  totalShots: 0,
+};
+
+export const useGameStore = create<GameStore>()(
+  persist(
+    (set) => ({
+      ...initialState,
+      
+      addMarbles: (count) => 
+        set((state) => ({ 
+          marbleCount: state.marbleCount + count,
+          totalMarblesWon: state.totalMarblesWon + count,
+        })),
+      
+      removeMarbles: (count) => 
+        set((state) => ({ 
+          marbleCount: Math.max(0, state.marbleCount - count),
+          totalMarblesLost: state.totalMarblesLost + count,
+        })),
+      
+      recordShot: () => 
+        set((state) => ({ totalShots: state.totalShots + 1 })),
+      
+      completeLevel: (level) => 
+        set((state) => {
+          const key = `level${level}Completions` as keyof GameProgress;
+          return { [key]: (state[key] as number) + 1 };
+        }),
+      
+      recordWin: (marbles) => 
+        set((state) => ({
+          marbleCount: state.marbleCount + marbles,
+          totalMarblesWon: state.totalMarblesWon + marbles,
+        })),
+      
+      recordLoss: (marbles) => 
+        set((state) => ({
+          marbleCount: Math.max(0, state.marbleCount - marbles),
+          totalMarblesLost: state.totalMarblesLost + marbles,
+        })),
+      
+      resetProgress: () => set(initialState),
+    }),
+    {
+      name: 'african-marble-game-storage',
+    }
+  )
+);
+
+================================================================================
+FILE: src/hooks/useMarblePhysics.ts
+================================================================================
+
+import { useRef, useCallback } from 'react';
+import * as THREE from 'three';
+
+interface MarblePhysics {
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  isMoving: boolean;
+}
+
+export const useMarblePhysics = () => {
+  const friction = 0.96;
+  const minVelocity = 0.001;
+
+  const updateMarble = useCallback((marble: MarblePhysics) => {
+    if (!marble.isMoving) return;
+
+    // Apply velocity
+    marble.position.x += marble.velocity.x;
+    marble.position.z += marble.velocity.z;
+
+    // Apply friction
+    marble.velocity.x *= friction;
+    marble.velocity.z *= friction;
+
+    // Check if stopped
+    const speed = Math.sqrt(marble.velocity.x ** 2 + marble.velocity.z ** 2);
+    if (speed < minVelocity) {
+      marble.velocity.set(0, 0, 0);
+      marble.isMoving = false;
+    }
+  }, []);
+
+  const checkCollision = useCallback((
+    marble1: MarblePhysics, 
+    marble2: MarblePhysics,
+    marbleRadius: number = 0.15
+  ): boolean => {
+    const dx = marble1.position.x - marble2.position.x;
+    const dz = marble1.position.z - marble2.position.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance < marbleRadius * 2) {
+      // Elastic collision
+      const nx = dx / distance;
+      const nz = dz / distance;
+
+      const relVelX = marble1.velocity.x - marble2.velocity.x;
+      const relVelZ = marble1.velocity.z - marble2.velocity.z;
+
+      const dot = relVelX * nx + relVelZ * nz;
+
+      // Update velocities (elastic collision)
+      marble1.velocity.x -= dot * nx;
+      marble1.velocity.z -= dot * nz;
+      marble2.velocity.x += dot * nx;
+      marble2.velocity.z += dot * nz;
+
+      marble1.isMoving = true;
+      marble2.isMoving = true;
+
+      // Separate marbles to prevent overlap
+      const overlap = marbleRadius * 2 - distance;
+      marble1.position.x += (overlap / 2) * nx;
+      marble1.position.z += (overlap / 2) * nz;
+      marble2.position.x -= (overlap / 2) * nx;
+      marble2.position.z -= (overlap / 2) * nz;
+
+      return true;
+    }
+    return false;
+  }, []);
+
+  const isInsideCircle = useCallback((
+    position: THREE.Vector3, 
+    center: THREE.Vector3, 
+    radius: number
+  ): boolean => {
+    const dx = position.x - center.x;
+    const dz = position.z - center.z;
+    return Math.sqrt(dx * dx + dz * dz) < radius;
+  }, []);
+
+  const isInsideTriangle = useCallback((
+    point: THREE.Vector3,
+    v1: THREE.Vector3,
+    v2: THREE.Vector3,
+    v3: THREE.Vector3
+  ): boolean => {
+    const sign = (p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3) => {
+      return (p1.x - p3.x) * (p2.z - p3.z) - (p2.x - p3.x) * (p1.z - p3.z);
+    };
+
+    const d1 = sign(point, v1, v2);
+    const d2 = sign(point, v2, v3);
+    const d3 = sign(point, v3, v1);
+
+    const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+    return !(hasNeg && hasPos);
+  }, []);
+
+  const isOnCrossLines = useCallback((
+    position: THREE.Vector3,
+    center: THREE.Vector3,
+    tolerance: number = 0.2
+  ): boolean => {
+    const dx = Math.abs(position.x - center.x);
+    const dz = Math.abs(position.z - center.z);
+    return dx < tolerance || dz < tolerance;
+  }, []);
+
+  const isInsideHole = useCallback((
+    position: THREE.Vector3,
+    holeCenter: THREE.Vector3,
+    holeRadius: number = 0.35
+  ): boolean => {
+    const dx = position.x - holeCenter.x;
+    const dz = position.z - holeCenter.z;
+    return Math.sqrt(dx * dx + dz * dz) < holeRadius;
+  }, []);
+
+  return {
+    updateMarble,
+    checkCollision,
+    isInsideCircle,
+    isInsideTriangle,
+    isOnCrossLines,
+    isInsideHole,
+  };
+};
+
+================================================================================
+FILE: src/components/GameResult.tsx
+================================================================================
+
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Trophy, XCircle, RotateCcw, Home, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+interface GameResultProps {
+  isOpen: boolean;
+  isWin: boolean;
+  marblesChange: number;
+  onPlayAgain: () => void;
+  levelName: string;
+}
+
+export const GameResult = ({ 
+  isOpen, 
+  isWin, 
+  marblesChange, 
+  onPlayAgain,
+  levelName 
+}: GameResultProps) => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isOpen && isWin) {
+      // Trigger confetti-like effect
+      const confetti = document.createElement('div');
+      confetti.className = 'fixed inset-0 pointer-events-none z-50';
+      confetti.innerHTML = Array.from({ length: 20 }, (_, i) => `
+        <div class="absolute animate-float" style="
+          left: ${Math.random() * 100}%;
+          top: ${Math.random() * 100}%;
+          animation-delay: ${Math.random() * 2}s;
+        ">
+          <div class="w-3 h-3 rounded-full" style="background: hsl(${Math.random() * 360} 70% 60%)"></div>
+        </div>
+      `).join('');
+      document.body.appendChild(confetti);
+      
+      setTimeout(() => confetti.remove(), 3000);
+    }
+  }, [isOpen, isWin]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-foreground/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div 
+        className={`
+          bg-card rounded-2xl shadow-2xl p-8 max-w-md w-full animate-scale-in
+          border-4 ${isWin ? 'border-gold' : 'border-destructive'}
+        `}
+      >
+        {/* Icon */}
+        <div className="flex justify-center mb-6">
+          {isWin ? (
+            <div className="relative">
+              <Trophy className="w-20 h-20 text-gold animate-bounce-slow" />
+              <Sparkles className="absolute -top-2 -right-2 w-8 h-8 text-gold animate-pulse" />
+            </div>
+          ) : (
+            <XCircle className="w-20 h-20 text-destructive" />
+          )}
+        </div>
+
+        {/* Title */}
+        <h2 className={`text-3xl font-bold text-center mb-2 ${isWin ? 'text-gold text-shadow-gold' : 'text-destructive'}`}>
+          {isWin ? 'Victory!' : 'Try Again!'}
+        </h2>
+        
+        <p className="text-center text-muted-foreground mb-4">
+          {levelName}
+        </p>
+
+        {/* Marble Change */}
+        <div className={`
+          text-center py-4 px-6 rounded-xl mb-6
+          ${isWin ? 'bg-gold/20' : 'bg-destructive/20'}
+        `}>
+          <p className="text-lg text-muted-foreground mb-1">Marbles</p>
+          <p className={`text-4xl font-bold ${isWin ? 'text-green-600' : 'text-destructive'}`}>
+            {marblesChange > 0 ? '+' : ''}{marblesChange}
+          </p>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex gap-3">
+          <Button 
+            variant="outline" 
+            className="flex-1"
+            onClick={() => navigate('/')}
+          >
+            <Home className="w-4 h-4 mr-2" />
+            Home
+          </Button>
+          <Button 
+            className={`flex-1 ${isWin ? 'bg-gold hover:bg-gold/90 text-earth' : ''}`}
+            onClick={onPlayAgain}
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Play Again
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+================================================================================
+FILE: src/components/MarbleCounter.tsx
+================================================================================
+
+import { Circle, Trophy } from 'lucide-react';
+
+interface MarbleCounterProps {
+  count: number;
+  size?: 'sm' | 'md' | 'lg';
+}
+
+export const MarbleCounter = ({ count, size = 'md' }: MarbleCounterProps) => {
+  const sizeClasses = {
+    sm: 'text-sm px-2 py-1',
+    md: 'text-base px-3 py-1.5',
+    lg: 'text-lg px-4 py-2',
+  };
+
+  const iconSizes = {
+    sm: 'w-4 h-4',
+    md: 'w-5 h-5',
+    lg: 'w-6 h-6',
+  };
+
+  return (
+    <div 
+      className={`flex items-center gap-2 bg-gold/90 text-earth rounded-full font-bold 
+                  shadow-lg ${sizeClasses[size]} animate-pulse-glow`}
+    >
+      <Trophy className={iconSizes[size]} />
+      <span>{count}</span>
+      <Circle className={`${iconSizes[size]} fill-marble-shooter`} />
+    </div>
+  );
+};
+
+================================================================================
+FILE: src/components/PowerMeter.tsx
+================================================================================
+
+interface PowerMeterProps {
+  power: number; // 0 to 1
+  visible: boolean;
+}
+
+export const PowerMeter = ({ power, visible }: PowerMeterProps) => {
+  if (!visible) return null;
+
+  const getColor = () => {
+    if (power < 0.33) return 'bg-green-500';
+    if (power < 0.66) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+
+  const height = Math.min(power * 100, 100);
+
+  return (
+    <div className="fixed right-4 top-1/2 -translate-y-1/2 z-40">
+      <div className="w-6 h-32 bg-muted/80 rounded-full border-2 border-border overflow-hidden shadow-lg">
+        <div className="w-full h-full flex flex-col-reverse">
+          <div 
+            className={`w-full transition-all duration-100 ${getColor()} rounded-full`}
+            style={{ height: `${height}%` }}
+          />
+        </div>
+      </div>
+      <div className="text-center mt-2 text-sm font-bold text-foreground">
+        {Math.round(power * 100)}%
+      </div>
+    </div>
+  );
+};
+
+================================================================================
+FILE: src/components/Layout.tsx
+================================================================================
+
+import { ReactNode } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Circle, Home, Trophy } from 'lucide-react';
+import { useGameStore } from '@/store/gameStore';
+import { MarbleCounter } from './MarbleCounter';
+
+interface LayoutProps {
+  children: ReactNode;
+}
+
+export const Layout = ({ children }: LayoutProps) => {
+  const location = useLocation();
+  const { marbleCount } = useGameStore();
+  
+  const isHome = location.pathname === '/';
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background african-pattern">
+      {/* Header */}
+      <header className="bg-gradient-to-r from-primary to-earth-light shadow-lg sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3 group">
+            <div className="relative">
+              <Circle 
+                className="w-10 h-10 text-primary-foreground fill-gold group-hover:animate-spin" 
+                style={{ animationDuration: '2s' }}
+              />
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-gold-light to-gold opacity-80" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-primary-foreground tracking-wide">
+                African Marble
+              </h1>
+              <p className="text-xs text-primary-foreground/80">Traditional Game</p>
+            </div>
+          </Link>
+          
+          <div className="flex items-center gap-4">
+            <MarbleCounter count={marbleCount} />
+            
+            {!isHome && (
+              <Link 
+                to="/"
+                className="flex items-center gap-2 bg-primary-foreground/10 hover:bg-primary-foreground/20 
+                         text-primary-foreground px-4 py-2 rounded-lg transition-colors"
+              >
+                <Home className="w-4 h-4" />
+                <span className="hidden sm:inline">Home</span>
+              </Link>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 container mx-auto px-4 py-6">
+        {children}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-earth text-primary-foreground py-6">
+        <div className="container mx-auto px-4 text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Trophy className="w-5 h-5 text-gold" />
+            <span className="font-semibold">Preserving African Heritage</span>
+            <Trophy className="w-5 h-5 text-gold" />
+          </div>
+          <p className="text-sm text-primary-foreground/70">
+            A traditional marble game played by children across African villages for generations.
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+================================================================================
+FILE: src/pages/HomePage.tsx
+================================================================================
+
+import { Link } from 'react-router-dom';
+import { Layout } from '@/components/Layout';
+import { useGameStore } from '@/store/gameStore';
+import { 
+  Circle, 
+  Lock, 
+  Unlock, 
+  Target, 
+  Triangle, 
+  CircleDot,
+  Trophy,
+  Crosshair,
+  Zap,
+  History
+} from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+
+const HomePage = () => {
+  const { 
+    marbleCount, 
+    level1Completions, 
+    level2Completions, 
+    level3Completions,
+    totalMarblesWon,
+    totalMarblesLost,
+    totalShots 
+  } = useGameStore();
+
+  const levels = [
+    {
+      id: 1,
+      name: 'Hole Challenge',
+      description: 'Get your marble in the hole to win!',
+      icon: Target,
+      reward: '+1 marble',
+      risk: 'No risk - practice mode',
+      gradient: 'level-card-1',
+      unlocked: true,
+      completions: level1Completions,
+      path: '/level/1',
+    },
+    {
+      id: 2,
+      name: 'Triangle Formation',
+      description: 'Knock all 3 marbles outside the triangle!',
+      icon: Triangle,
+      reward: '+3 marbles',
+      risk: '-1 marble if you lose',
+      gradient: 'level-card-2',
+      unlocked: marbleCount >= 1,
+      completions: level2Completions,
+      path: '/level/2',
+    },
+    {
+      id: 3,
+      name: 'Circle & Cross',
+      description: 'Knock all 4 marbles outside the circle!',
+      icon: CircleDot,
+      reward: '+4 marbles',
+      risk: '-1 marble + return won marbles',
+      gradient: 'level-card-3',
+      unlocked: marbleCount >= 1,
+      completions: level3Completions,
+      path: '/level/3',
+    },
+  ];
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
+        {/* Hero Section */}
+        <div className="text-center py-8">
+          <div className="flex justify-center mb-4">
+            <div className="relative">
+              <Circle className="w-24 h-24 text-primary fill-gold animate-float" />
+              <div className="absolute inset-2 rounded-full bg-gradient-to-br from-gold-light to-gold opacity-80" />
+            </div>
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3">
+            African Marble Game
+          </h1>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Experience the traditional marble game played by children across African villages. 
+            Master the art of aim and precision!
+          </p>
+        </div>
+
+        {/* Statistics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="bg-gold/20 border-gold/50">
+            <CardContent className="p-4 text-center">
+              <Trophy className="w-8 h-8 mx-auto text-gold mb-2" />
+              <p className="text-2xl font-bold text-foreground">{totalMarblesWon}</p>
+              <p className="text-sm text-muted-foreground">Marbles Won</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-destructive/10 border-destructive/30">
+            <CardContent className="p-4 text-center">
+              <Circle className="w-8 h-8 mx-auto text-destructive mb-2" />
+              <p className="text-2xl font-bold text-foreground">{totalMarblesLost}</p>
+              <p className="text-sm text-muted-foreground">Marbles Lost</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-accent/20 border-accent/30">
+            <CardContent className="p-4 text-center">
+              <Crosshair className="w-8 h-8 mx-auto text-accent mb-2" />
+              <p className="text-2xl font-bold text-foreground">{totalShots}</p>
+              <p className="text-sm text-muted-foreground">Total Shots</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-primary/10 border-primary/30">
+            <CardContent className="p-4 text-center">
+              <History className="w-8 h-8 mx-auto text-primary mb-2" />
+              <p className="text-2xl font-bold text-foreground">
+                {level1Completions + level2Completions + level3Completions}
+              </p>
+              <p className="text-sm text-muted-foreground">Levels Completed</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Level Selection */}
+        <div>
+          <h2 className="text-2xl font-bold text-foreground mb-4 flex items-center gap-2">
+            <Zap className="w-6 h-6 text-gold" />
+            Choose Your Challenge
+          </h2>
+          <div className="grid md:grid-cols-3 gap-6">
+            {levels.map((level) => (
+              <Card 
+                key={level.id}
+                className={`
+                  relative overflow-hidden transition-all duration-300
+                  ${level.unlocked 
+                    ? 'hover:scale-105 hover:shadow-xl cursor-pointer' 
+                    : 'opacity-60 cursor-not-allowed'
+                  }
+                `}
+              >
+                <div className={`absolute inset-0 ${level.gradient} opacity-90`} />
+                <CardHeader className="relative z-10">
+                  <div className="flex justify-between items-start">
+                    <level.icon className="w-12 h-12 text-white/90" />
+                    {level.unlocked ? (
+                      <Unlock className="w-6 h-6 text-white/80" />
+                    ) : (
+                      <Lock className="w-6 h-6 text-white/80" />
+                    )}
+                  </div>
+                  <CardTitle className="text-white text-xl">
+                    Level {level.id}: {level.name}
+                  </CardTitle>
+                  <CardDescription className="text-white/80">
+                    {level.description}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="relative z-10 space-y-3">
+                  <div className="bg-white/20 rounded-lg p-3 text-white text-sm">
+                    <p className="font-semibold text-green-200">Trophy {level.reward}</p>
+                    <p className="text-red-200">Warning {level.risk}</p>
+                  </div>
+                  <div className="text-white/70 text-sm">
+                    Completed: {level.completions} times
+                  </div>
+                  {level.unlocked ? (
+                    <Link to={level.path}>
+                      <Button className="w-full bg-white/20 hover:bg-white/30 text-white border border-white/30">
+                        Play Now
+                      </Button>
+                    </Link>
+                  ) : (
+                    <Button disabled className="w-full bg-white/10 text-white/50">
+                      Need 1+ marble to unlock
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+
+        {/* Cultural Heritage Section */}
+        <Card className="bg-sand-light/50 border-earth/30">
+          <CardHeader>
+            <CardTitle className="text-earth flex items-center gap-2">
+              <Circle className="w-6 h-6 fill-earth" />
+              Cultural Heritage
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-muted-foreground">
+            <p>
+              <strong>The African Marble Game</strong> is a beloved traditional pastime that has been 
+              played across the African continent for generations. Children would gather in village 
+              courtyards, drawing circles and triangles in the sandy ground with sticks.
+            </p>
+            <p>
+              The game teaches valuable skills: <strong>hand-eye coordination</strong>, 
+              <strong> strategic thinking</strong>, <strong> physics understanding</strong>, and 
+              <strong> patience</strong>. Players learn to calculate angles, judge distances, and 
+              apply the right amount of force.
+            </p>
+            <p>
+              In many communities, marbles were prized possessions. Winning marbles meant prestige 
+              and skill. This digital version preserves these authentic rules while making the 
+              experience accessible to players worldwide.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-2">
+              {['Africa', 'Precision', 'Strategy', 'Community', 'Competition'].map(tag => (
+                <span 
+                  key={tag} 
+                  className="bg-earth/10 text-earth px-3 py-1 rounded-full text-sm"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+};
+
+export default HomePage;
+
+================================================================================
+FILE: src/pages/Level1Page.tsx (FULL - 679 lines)
+================================================================================
+
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Line, OrbitControls, Environment, Sky, useTexture } from '@react-three/drei';
+import * as THREE from 'three';
+import { Layout } from '@/components/Layout';
+import { PowerMeter } from '@/components/PowerMeter';
+import { GameResult } from '@/components/GameResult';
+import { useGameStore } from '@/store/gameStore';
+import { ArrowLeft, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Link } from 'react-router-dom';
+
+const SHOOTER_START: [number, number, number] = [0, 0.2, 3];
+const HOLE_POSITION: [number, number, number] = [0, -0.2, -2];
+const HOLE_RADIUS = 0.5;
+const GROUND_SIZE = 12;
+const WALL_HEIGHT = 0.8;
+
+// Realistic Sand Ground with procedural texture
+const SandGround = () => {
+  const sandTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Base sand color
+    ctx.fillStyle = '#C4A574';
+    ctx.fillRect(0, 0, 512, 512);
+    
+    // Add grain texture
+    for (let i = 0; i < 15000; i++) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const shade = Math.random() * 40 - 20;
+      const r = 196 + shade;
+      const g = 165 + shade;
+      const b = 116 + shade;
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+    
+    // Add some darker spots
+    for (let i = 0; i < 200; i++) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      ctx.fillStyle = 'rgba(139, 90, 43, 0.3)';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.random() * 8 + 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+    return texture;
+  }, []);
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+      <meshStandardMaterial 
+        map={sandTexture}
+        roughness={0.95}
+        metalness={0.05}
+        bumpScale={0.02}
+      />
+    </mesh>
+  );
+};
+
+// 3D Walls/Boundaries
+const Boundaries = () => {
+  const woodColor = '#5D3E29';
+  const halfSize = GROUND_SIZE / 2;
+  
+  return (
+    <group>
+      {/* Front wall */}
+      <mesh position={[0, WALL_HEIGHT / 2, -halfSize]} castShadow receiveShadow>
+        <boxGeometry args={[GROUND_SIZE + 0.4, WALL_HEIGHT, 0.2]} />
+        <meshStandardMaterial color={woodColor} roughness={0.8} />
+      </mesh>
+      
+      {/* Back wall */}
+      <mesh position={[0, WALL_HEIGHT / 2, halfSize]} castShadow receiveShadow>
+        <boxGeometry args={[GROUND_SIZE + 0.4, WALL_HEIGHT, 0.2]} />
+        <meshStandardMaterial color={woodColor} roughness={0.8} />
+      </mesh>
+      
+      {/* Left wall */}
+      <mesh position={[-halfSize, WALL_HEIGHT / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.2, WALL_HEIGHT, GROUND_SIZE]} />
+        <meshStandardMaterial color={woodColor} roughness={0.8} />
+      </mesh>
+      
+      {/* Right wall */}
+      <mesh position={[halfSize, WALL_HEIGHT / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.2, WALL_HEIGHT, GROUND_SIZE]} />
+        <meshStandardMaterial color={woodColor} roughness={0.8} />
+      </mesh>
+      
+      {/* Corner posts */}
+      {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+        <mesh 
+          key={i} 
+          position={[x * halfSize, WALL_HEIGHT / 2, z * halfSize]} 
+          castShadow
+        >
+          <cylinderGeometry args={[0.15, 0.15, WALL_HEIGHT, 8]} />
+          <meshStandardMaterial color="#3D2817" roughness={0.7} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// 3D Hole with depth
+const Hole = () => {
+  return (
+    <group position={HOLE_POSITION}>
+      {/* Hole rim */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.21, 0]}>
+        <ringGeometry args={[HOLE_RADIUS - 0.05, HOLE_RADIUS + 0.08, 32]} />
+        <meshStandardMaterial color="#654321" roughness={0.9} />
+      </mesh>
+      
+      {/* Hole interior (cylinder going down) */}
+      <mesh position={[0, -0.15, 0]}>
+        <cylinderGeometry args={[HOLE_RADIUS, HOLE_RADIUS * 0.8, 0.5, 32]} />
+        <meshStandardMaterial color="#1a0f0a" side={THREE.BackSide} />
+      </mesh>
+      
+      {/* Hole bottom */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.4, 0]}>
+        <circleGeometry args={[HOLE_RADIUS * 0.8, 32]} />
+        <meshStandardMaterial color="#0a0505" />
+      </mesh>
+      
+      {/* Shadow ring on ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <ringGeometry args={[HOLE_RADIUS + 0.08, HOLE_RADIUS + 0.3, 32]} />
+        <meshStandardMaterial color="#000000" transparent opacity={0.2} />
+      </mesh>
+    </group>
+  );
+};
+
+// 3D Starting Line marker
+const StartingLine = () => {
+  return (
+    <group position={[0, 0.02, 4]}>
+      {/* Main line */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[3, 0.1]} />
+        <meshStandardMaterial color="#8B4513" roughness={0.9} />
+      </mesh>
+      
+      {/* Side markers */}
+      <mesh position={[-1.6, 0.1, 0]} castShadow>
+        <cylinderGeometry args={[0.08, 0.08, 0.25, 8]} />
+        <meshStandardMaterial color="#D4A574" roughness={0.6} />
+      </mesh>
+      <mesh position={[1.6, 0.1, 0]} castShadow>
+        <cylinderGeometry args={[0.08, 0.08, 0.25, 8]} />
+        <meshStandardMaterial color="#D4A574" roughness={0.6} />
+      </mesh>
+    </group>
+  );
+};
+
+// Realistic Marble with reflections
+const ShooterMarble = ({ 
+  position, 
+  velocity,
+  onPositionUpdate
+}: { 
+  position: React.MutableRefObject<THREE.Vector3>;
+  velocity: React.MutableRefObject<THREE.Vector3>;
+  onPositionUpdate: (pos: THREE.Vector3) => void;
+}) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const halfSize = GROUND_SIZE / 2 - 0.3;
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+    
+    // Apply velocity
+    position.current.x += velocity.current.x;
+    position.current.z += velocity.current.z;
+    
+    // Wall collisions with bounce
+    if (position.current.x < -halfSize) {
+      position.current.x = -halfSize;
+      velocity.current.x *= -0.6; // Bounce with energy loss
+    }
+    if (position.current.x > halfSize) {
+      position.current.x = halfSize;
+      velocity.current.x *= -0.6;
+    }
+    if (position.current.z < -halfSize) {
+      position.current.z = -halfSize;
+      velocity.current.z *= -0.6;
+    }
+    if (position.current.z > halfSize) {
+      position.current.z = halfSize;
+      velocity.current.z *= -0.6;
+    }
+    
+    // Check if falling into hole
+    const dx = position.current.x - HOLE_POSITION[0];
+    const dz = position.current.z - HOLE_POSITION[2];
+    const distToHole = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distToHole < HOLE_RADIUS * 0.7) {
+      // Marble falls into hole
+      position.current.y = Math.max(position.current.y - 0.05, -0.3);
+      velocity.current.multiplyScalar(0.9);
+    } else {
+      position.current.y = SHOOTER_START[1];
+    }
+    
+    // Apply friction (sand friction is higher)
+    velocity.current.x *= 0.965;
+    velocity.current.z *= 0.965;
+    
+    // Update mesh position
+    meshRef.current.position.copy(position.current);
+    onPositionUpdate(position.current.clone());
+    
+    // Realistic rolling rotation
+    const speed = Math.sqrt(velocity.current.x ** 2 + velocity.current.z ** 2);
+    if (speed > 0.001) {
+      const rotationSpeed = speed * 5;
+      meshRef.current.rotation.x += velocity.current.z * rotationSpeed;
+      meshRef.current.rotation.z -= velocity.current.x * rotationSpeed;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} position={SHOOTER_START} castShadow>
+      <sphereGeometry args={[0.2, 64, 64]} />
+      <meshStandardMaterial 
+        color="#1C2833"
+        metalness={0.8}
+        roughness={0.15}
+        envMapIntensity={1.2}
+      />
+    </mesh>
+  );
+};
+
+// Decorative stones around the field
+const DecoStones = () => {
+  const stones = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < 15; i++) {
+      const angle = (i / 15) * Math.PI * 2;
+      const radius = GROUND_SIZE / 2 + 0.8;
+      arr.push({
+        position: [
+          Math.cos(angle) * radius + (Math.random() - 0.5) * 0.5,
+          0.1 + Math.random() * 0.1,
+          Math.sin(angle) * radius + (Math.random() - 0.5) * 0.5
+        ] as [number, number, number],
+        scale: 0.1 + Math.random() * 0.15,
+        color: `hsl(30, ${20 + Math.random() * 20}%, ${40 + Math.random() * 20}%)`
+      });
+    }
+    return arr;
+  }, []);
+
+  return (
+    <group>
+      {stones.map((stone, i) => (
+        <mesh key={i} position={stone.position} castShadow>
+          <dodecahedronGeometry args={[stone.scale, 0]} />
+          <meshStandardMaterial color={stone.color} roughness={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// Aim Arrow (3D)
+const AimArrow = ({ 
+  start, 
+  direction, 
+  power, 
+  visible 
+}: { 
+  start: THREE.Vector3; 
+  direction: THREE.Vector3; 
+  power: number; 
+  visible: boolean; 
+}) => {
+  if (!visible || power < 0.05) return null;
+  
+  const length = power * 3;
+  const end = start.clone().add(direction.clone().multiplyScalar(length));
+  
+  return (
+    <group>
+      {/* Arrow line */}
+      <Line 
+        points={[[start.x, 0.3, start.z], [end.x, 0.3, end.z]]} 
+        color="#ffffff" 
+        lineWidth={3}
+        transparent
+        opacity={0.8}
+      />
+      
+      {/* Power indicator dots */}
+      {[0.25, 0.5, 0.75].map((t, i) => (
+        power > t && (
+          <mesh 
+            key={i}
+            position={[
+              start.x + direction.x * length * t,
+              0.3,
+              start.z + direction.z * length * t
+            ]}
+          >
+            <sphereGeometry args={[0.05, 8, 8]} />
+            <meshBasicMaterial color={power > 0.7 ? '#ff4444' : power > 0.4 ? '#ffaa00' : '#44ff44'} />
+          </mesh>
+        )
+      ))}
+    </group>
+  );
+};
+
+// Interactive ground plane for drag detection
+const DragPlane = ({ 
+  onDragStart, 
+  onDrag, 
+  onDragEnd,
+  marblePosition,
+  canInteract,
+  setIsDragging
+}: {
+  onDragStart: (point: THREE.Vector3) => void;
+  onDrag: (point: THREE.Vector3) => void;
+  onDragEnd: (point: THREE.Vector3) => void;
+  marblePosition: THREE.Vector3;
+  canInteract: boolean;
+  setIsDragging: (dragging: boolean) => void;
+}) => {
+  const [localDragging, setLocalDragging] = useState(false);
+  const planeRef = useRef<THREE.Mesh>(null);
+
+  const handlePointerDown = useCallback((e: any) => {
+    if (!canInteract) return;
+    e.stopPropagation();
+    
+    const point = e.point as THREE.Vector3;
+    const dx = point.x - marblePosition.x;
+    const dz = point.z - marblePosition.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    
+    if (dist < 1) {
+      setLocalDragging(true);
+      setIsDragging(true);
+      onDragStart(point);
+    }
+  }, [canInteract, marblePosition, onDragStart, setIsDragging]);
+
+  const handlePointerMove = useCallback((e: any) => {
+    if (!localDragging) return;
+    onDrag(e.point as THREE.Vector3);
+  }, [localDragging, onDrag]);
+
+  const handlePointerUp = useCallback((e: any) => {
+    if (!localDragging) return;
+    setLocalDragging(false);
+    setIsDragging(false);
+    onDragEnd(e.point as THREE.Vector3);
+  }, [localDragging, onDragEnd, setIsDragging]);
+
+  return (
+    <mesh 
+      ref={planeRef}
+      rotation={[-Math.PI / 2, 0, 0]} 
+      position={[0, 0.02, 0]}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
+      <planeGeometry args={[30, 30]} />
+      <meshBasicMaterial visible={false} />
+    </mesh>
+  );
+};
+
+const GameScene = ({ 
+  marblePosition,
+  velocity,
+  onShoot,
+  onDragUpdate,
+  canShoot,
+  currentMarblePos
+}: {
+  marblePosition: React.MutableRefObject<THREE.Vector3>;
+  velocity: React.MutableRefObject<THREE.Vector3>;
+  onShoot: (power: number, direction: THREE.Vector3) => void;
+  onDragUpdate: (power: number, direction: THREE.Vector3 | null) => void;
+  canShoot: boolean;
+  currentMarblePos: THREE.Vector3;
+}) => {
+  const dragStartRef = useRef<THREE.Vector3 | null>(null);
+  const [aimDirection, setAimDirection] = useState<THREE.Vector3>(new THREE.Vector3());
+  const [aimPower, setAimPower] = useState(0);
+  const [showAim, setShowAim] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = useCallback((point: THREE.Vector3) => {
+    dragStartRef.current = marblePosition.current.clone();
+    setShowAim(true);
+  }, [marblePosition]);
+
+  const handleDrag = useCallback((point: THREE.Vector3) => {
+    if (!dragStartRef.current) return;
+    
+    const dx = dragStartRef.current.x - point.x;
+    const dz = dragStartRef.current.z - point.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const power = Math.min(distance / 3, 1);
+    const direction = new THREE.Vector3(dx, 0, dz).normalize();
+    
+    setAimDirection(direction);
+    setAimPower(power);
+    onDragUpdate(power, direction);
+  }, [onDragUpdate]);
+
+  const handleDragEnd = useCallback((point: THREE.Vector3) => {
+    if (!dragStartRef.current) return;
+    
+    const dx = dragStartRef.current.x - point.x;
+    const dz = dragStartRef.current.z - point.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distance > 0.2) {
+      const power = Math.min(distance / 3, 1);
+      const direction = new THREE.Vector3(dx, 0, dz).normalize();
+      onShoot(power, direction);
+    }
+    
+    dragStartRef.current = null;
+    setShowAim(false);
+    setAimPower(0);
+    onDragUpdate(0, null);
+  }, [onShoot, onDragUpdate]);
+
+  const handleMarblePositionUpdate = useCallback((pos: THREE.Vector3) => {
+    // Position update handled by parent
+  }, []);
+
+  return (
+    <>
+      {/* Environment & Lighting */}
+      <Sky 
+        distance={450000}
+        sunPosition={[5, 15, 10]}
+        inclination={0.6}
+        azimuth={0.25}
+      />
+      <ambientLight intensity={0.5} />
+      <directionalLight 
+        position={[8, 20, 8]} 
+        intensity={1.5} 
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-far={50}
+        shadow-camera-left={-15}
+        shadow-camera-right={15}
+        shadow-camera-top={15}
+        shadow-camera-bottom={-15}
+      />
+      <hemisphereLight args={['#87CEEB', '#C4A574', 0.4]} />
+
+      {/* Ground */}
+      <SandGround />
+
+      {/* Boundaries */}
+      <Boundaries />
+
+      {/* Decorative elements */}
+      <DecoStones />
+
+      {/* Hole */}
+      <Hole />
+
+      {/* Starting Line */}
+      <StartingLine />
+
+      {/* Aim Arrow */}
+      <AimArrow 
+        start={currentMarblePos} 
+        direction={aimDirection} 
+        power={aimPower} 
+        visible={showAim} 
+      />
+
+      {/* Shooter Marble */}
+      <ShooterMarble 
+        position={marblePosition} 
+        velocity={velocity} 
+        onPositionUpdate={handleMarblePositionUpdate}
+      />
+
+      {/* Interactive Drag Plane */}
+      <DragPlane 
+        onDragStart={handleDragStart}
+        onDrag={handleDrag}
+        onDragEnd={handleDragEnd}
+        marblePosition={currentMarblePos}
+        canInteract={canShoot}
+        setIsDragging={setIsDragging}
+      />
+
+      {/* Camera controls for viewing - DISABLED during aiming */}
+      <OrbitControls 
+        enablePan={false}
+        enableZoom={true}
+        enableRotate={!isDragging}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.5}
+        minDistance={8}
+        maxDistance={20}
+      />
+    </>
+  );
+};
+
+const Level1Page = () => {
+  const marblePosition = useRef(new THREE.Vector3(...SHOOTER_START));
+  const velocity = useRef(new THREE.Vector3(0, 0, 0));
+  
+  const [power, setPower] = useState(0);
+  const [shots, setShots] = useState(0);
+  const [isMoving, setIsMoving] = useState(false);
+  const [showResult, setShowResult] = useState(false);
+  const [isWin, setIsWin] = useState(false);
+  const [currentMarblePos, setCurrentMarblePos] = useState(new THREE.Vector3(...SHOOTER_START));
+  
+  const { recordShot, recordWin, completeLevel } = useGameStore();
+
+  const checkWinCondition = useCallback(() => {
+    const pos = marblePosition.current;
+    const dx = pos.x - HOLE_POSITION[0];
+    const dz = pos.z - HOLE_POSITION[2];
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distance < HOLE_RADIUS * 0.7 && pos.y < 0) {
+      setIsWin(true);
+      setShowResult(true);
+      recordWin(1);
+      completeLevel(1);
+    }
+  }, [recordWin, completeLevel]);
+
+  // Check if marble stopped moving
+  useEffect(() => {
+    if (!isMoving) return;
+    
+    const checkInterval = setInterval(() => {
+      const speed = Math.sqrt(
+        velocity.current.x ** 2 + velocity.current.z ** 2
+      );
+      
+      // Update current position for UI
+      setCurrentMarblePos(marblePosition.current.clone());
+      
+      if (speed < 0.002) {
+        velocity.current.set(0, 0, 0);
+        setIsMoving(false);
+        checkWinCondition();
+      }
+    }, 50);
+
+    return () => clearInterval(checkInterval);
+  }, [isMoving, checkWinCondition]);
+
+  const handleShoot = useCallback((shootPower: number, direction: THREE.Vector3) => {
+    const force = shootPower * 0.25;
+    velocity.current.set(
+      direction.x * force,
+      0,
+      direction.z * force
+    );
+    setIsMoving(true);
+    setShots(s => s + 1);
+    recordShot();
+  }, [recordShot]);
+
+  const handleDragUpdate = useCallback((dragPower: number, direction: THREE.Vector3 | null) => {
+    setPower(dragPower);
+  }, []);
+
+  const resetGame = useCallback(() => {
+    marblePosition.current.set(...SHOOTER_START);
+    velocity.current.set(0, 0, 0);
+    setCurrentMarblePos(new THREE.Vector3(...SHOOTER_START));
+    setShots(0);
+    setIsMoving(false);
+    setShowResult(false);
+    setIsWin(false);
+  }, []);
+
+  return (
+    <Layout>
+      <div className="h-[calc(100vh-180px)] min-h-[500px] relative">
+        {/* Header */}
+        <div className="absolute top-0 left-0 right-0 z-10 flex justify-between items-center p-4">
+          <Link to="/">
+            <Button variant="outline" size="sm" className="bg-card/90 backdrop-blur">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          
+          <div className="bg-card/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg border border-border">
+            <h2 className="font-bold text-foreground">Level 1: Hole Challenge</h2>
+            <p className="text-sm text-muted-foreground">Shots: {shots}</p>
+          </div>
+          
+          <Button variant="outline" size="sm" onClick={resetGame} className="bg-card/90 backdrop-blur">
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Reset
+          </Button>
+        </div>
+
+        {/* Instructions */}
+        <div className="absolute bottom-4 left-4 z-10 bg-card/90 backdrop-blur p-4 rounded-lg max-w-xs border border-border shadow-lg">
+          <h3 className="font-semibold text-foreground mb-2">How to Play:</h3>
+          <ol className="text-sm text-muted-foreground space-y-1">
+            <li>1. Click near the dark marble</li>
+            <li>2. Drag backwards to aim and set power</li>
+            <li>3. Release to shoot into the hole!</li>
+          </ol>
+          <p className="text-xs text-muted-foreground mt-2 opacity-70">
+            Tip: Drag mouse to rotate camera view
+          </p>
+        </div>
+
+        {/* Power Meter */}
+        <PowerMeter power={power} visible={power > 0} />
+
+        {/* 3D Canvas */}
+        <Canvas 
+          shadows 
+          camera={{ position: [0, 12, 10], fov: 50 }}
+          gl={{ antialias: true }}
+        >
+          <GameScene 
+            marblePosition={marblePosition}
+            velocity={velocity}
+            onShoot={handleShoot}
+            onDragUpdate={handleDragUpdate}
+            canShoot={!isMoving}
+            currentMarblePos={currentMarblePos}
+          />
+        </Canvas>
+
+        {/* Game Result */}
+        <GameResult 
+          isOpen={showResult}
+          isWin={isWin}
+          marblesChange={isWin ? 1 : 0}
+          onPlayAgain={resetGame}
+          levelName="Level 1: Hole Challenge"
+        />
+      </div>
+    </Layout>
+  );
+};
+
+export default Level1Page;
+
+================================================================================
+FILE: src/pages/Level2Page.tsx (FULL - 690 lines)
+================================================================================
+
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Line, OrbitControls, Sky } from '@react-three/drei';
+import * as THREE from 'three';
+import { Layout } from '@/components/Layout';
+import { PowerMeter } from '@/components/PowerMeter';
+import { GameResult } from '@/components/GameResult';
+import { useGameStore } from '@/store/gameStore';
+import { ArrowLeft, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Link, useNavigate } from 'react-router-dom';
+
+const SHOOTER_START: [number, number, number] = [0, 0.2, 4];
+const GROUND_SIZE = 14;
+const WALL_HEIGHT = 0.8;
+const MARBLE_RADIUS = 0.2;
+
+// Triangle vertices (equilateral triangle centered at origin)
+const TRIANGLE_SIZE = 2.5;
+const TRIANGLE_VERTICES: [number, number, number][] = [
+  [0, 0.02, -TRIANGLE_SIZE],                    // Top
+  [-TRIANGLE_SIZE * 0.866, 0.02, TRIANGLE_SIZE * 0.5],  // Bottom left
+  [TRIANGLE_SIZE * 0.866, 0.02, TRIANGLE_SIZE * 0.5],   // Bottom right
+];
+
+// Target marble positions (at triangle corners)
+const TARGET_POSITIONS: [number, number, number][] = [
+  [0, 0.2, -TRIANGLE_SIZE + 0.3],
+  [-TRIANGLE_SIZE * 0.866 + 0.3, 0.2, TRIANGLE_SIZE * 0.5 - 0.2],
+  [TRIANGLE_SIZE * 0.866 - 0.3, 0.2, TRIANGLE_SIZE * 0.5 - 0.2],
+];
+
+const TARGET_COLORS = ['#E74C3C', '#27AE60', '#3498DB'];
+
+// Check if point is inside triangle
+const isInsideTriangle = (px: number, pz: number): boolean => {
+  const [v1, v2, v3] = TRIANGLE_VERTICES;
+  
+  const sign = (p1x: number, p1z: number, p2x: number, p2z: number, p3x: number, p3z: number) => {
+    return (p1x - p3x) * (p2z - p3z) - (p2x - p3x) * (p1z - p3z);
+  };
+  
+  const d1 = sign(px, pz, v1[0], v1[2], v2[0], v2[2]);
+  const d2 = sign(px, pz, v2[0], v2[2], v3[0], v3[2]);
+  const d3 = sign(px, pz, v3[0], v3[2], v1[0], v1[2]);
+  
+  const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+  const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+  
+  return !(hasNeg && hasPos);
+};
+
+// Sand Ground with texture
+const SandGround = () => {
+  const sandTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    
+    ctx.fillStyle = '#C4A574';
+    ctx.fillRect(0, 0, 512, 512);
+    
+    for (let i = 0; i < 15000; i++) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const shade = Math.random() * 40 - 20;
+      ctx.fillStyle = `rgb(${196 + shade}, ${165 + shade}, ${116 + shade})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+    return texture;
+  }, []);
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+      <meshStandardMaterial map={sandTexture} roughness={0.95} metalness={0.05} />
+    </mesh>
+  );
+};
+
+// 3D Boundaries
+const Boundaries = () => {
+  const woodColor = '#5D3E29';
+  const halfSize = GROUND_SIZE / 2;
+  
+  return (
+    <group>
+      {[
+        { pos: [0, WALL_HEIGHT / 2, -halfSize] as [number, number, number], size: [GROUND_SIZE + 0.4, WALL_HEIGHT, 0.2] as [number, number, number] },
+        { pos: [0, WALL_HEIGHT / 2, halfSize] as [number, number, number], size: [GROUND_SIZE + 0.4, WALL_HEIGHT, 0.2] as [number, number, number] },
+        { pos: [-halfSize, WALL_HEIGHT / 2, 0] as [number, number, number], size: [0.2, WALL_HEIGHT, GROUND_SIZE] as [number, number, number] },
+        { pos: [halfSize, WALL_HEIGHT / 2, 0] as [number, number, number], size: [0.2, WALL_HEIGHT, GROUND_SIZE] as [number, number, number] },
+      ].map((wall, i) => (
+        <mesh key={i} position={wall.pos} castShadow receiveShadow>
+          <boxGeometry args={wall.size} />
+          <meshStandardMaterial color={woodColor} roughness={0.8} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// Triangle boundary visualization
+const TriangleBoundary = () => {
+  const points: [number, number, number][] = [
+    ...TRIANGLE_VERTICES,
+    TRIANGLE_VERTICES[0], // Close the triangle
+  ];
+  
+  return (
+    <group>
+      {/* Triangle lines */}
+      <Line points={points} color="#8B4513" lineWidth={4} />
+      
+      {/* Corner markers */}
+      {TRIANGLE_VERTICES.map((v, i) => (
+        <mesh key={i} position={[v[0], 0.05, v[2]]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.15, 16]} />
+          <meshStandardMaterial color="#654321" />
+        </mesh>
+      ))}
+      
+      {/* Fill triangle with semi-transparent material */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <shapeGeometry args={[(() => {
+          const shape = new THREE.Shape();
+          shape.moveTo(TRIANGLE_VERTICES[0][0], -TRIANGLE_VERTICES[0][2]);
+          shape.lineTo(TRIANGLE_VERTICES[1][0], -TRIANGLE_VERTICES[1][2]);
+          shape.lineTo(TRIANGLE_VERTICES[2][0], -TRIANGLE_VERTICES[2][2]);
+          shape.closePath();
+          return shape;
+        })()]} />
+        <meshStandardMaterial color="#8B4513" transparent opacity={0.15} />
+      </mesh>
+    </group>
+  );
+};
+
+// Target Marble component
+interface TargetMarbleProps {
+  initialPosition: [number, number, number];
+  color: string;
+  velocity: React.MutableRefObject<THREE.Vector3>;
+  position: React.MutableRefObject<THREE.Vector3>;
+  index: number;
+}
+
+const TargetMarble = ({ initialPosition, color, velocity, position, index }: TargetMarbleProps) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const halfSize = GROUND_SIZE / 2 - 0.3;
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+    
+    position.current.x += velocity.current.x;
+    position.current.z += velocity.current.z;
+    
+    // Wall collisions
+    if (position.current.x < -halfSize) {
+      position.current.x = -halfSize;
+      velocity.current.x *= -0.6;
+    }
+    if (position.current.x > halfSize) {
+      position.current.x = halfSize;
+      velocity.current.x *= -0.6;
+    }
+    if (position.current.z < -halfSize) {
+      position.current.z = -halfSize;
+      velocity.current.z *= -0.6;
+    }
+    if (position.current.z > halfSize) {
+      position.current.z = halfSize;
+      velocity.current.z *= -0.6;
+    }
+    
+    // Friction
+    velocity.current.x *= 0.965;
+    velocity.current.z *= 0.965;
+    
+    meshRef.current.position.copy(position.current);
+    
+    // Rolling rotation
+    const speed = Math.sqrt(velocity.current.x ** 2 + velocity.current.z ** 2);
+    if (speed > 0.001) {
+      meshRef.current.rotation.x += velocity.current.z * 5;
+      meshRef.current.rotation.z -= velocity.current.x * 5;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} position={initialPosition} castShadow>
+      <sphereGeometry args={[MARBLE_RADIUS, 64, 64]} />
+      <meshStandardMaterial 
+        color={color}
+        metalness={0.7}
+        roughness={0.2}
+        envMapIntensity={1}
+      />
+    </mesh>
+  );
+};
+
+// Shooter Marble
+const ShooterMarble = ({ 
+  position, 
+  velocity,
+  targetPositions,
+  targetVelocities
+}: { 
+  position: React.MutableRefObject<THREE.Vector3>;
+  velocity: React.MutableRefObject<THREE.Vector3>;
+  targetPositions: React.MutableRefObject<THREE.Vector3>[];
+  targetVelocities: React.MutableRefObject<THREE.Vector3>[];
+}) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const halfSize = GROUND_SIZE / 2 - 0.3;
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+    
+    position.current.x += velocity.current.x;
+    position.current.z += velocity.current.z;
+    
+    // Wall collisions
+    if (position.current.x < -halfSize) {
+      position.current.x = -halfSize;
+      velocity.current.x *= -0.6;
+    }
+    if (position.current.x > halfSize) {
+      position.current.x = halfSize;
+      velocity.current.x *= -0.6;
+    }
+    if (position.current.z < -halfSize) {
+      position.current.z = -halfSize;
+      velocity.current.z *= -0.6;
+    }
+    if (position.current.z > halfSize) {
+      position.current.z = halfSize;
+      velocity.current.z *= -0.6;
+    }
+    
+    // Check collisions with target marbles
+    targetPositions.forEach((targetPos, i) => {
+      const dx = position.current.x - targetPos.current.x;
+      const dz = position.current.z - targetPos.current.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      
+      if (dist < MARBLE_RADIUS * 2) {
+        // Elastic collision
+        const nx = dx / dist;
+        const nz = dz / dist;
+        
+        const dvx = velocity.current.x - targetVelocities[i].current.x;
+        const dvz = velocity.current.z - targetVelocities[i].current.z;
+        
+        const dvn = dvx * nx + dvz * nz;
+        
+        if (dvn > 0) return; // Moving apart
+        
+        const restitution = 0.85;
+        
+        velocity.current.x -= dvn * nx * restitution;
+        velocity.current.z -= dvn * nz * restitution;
+        targetVelocities[i].current.x += dvn * nx * restitution;
+        targetVelocities[i].current.z += dvn * nz * restitution;
+        
+        // Separate marbles
+        const overlap = MARBLE_RADIUS * 2 - dist;
+        position.current.x += nx * overlap * 0.5;
+        position.current.z += nz * overlap * 0.5;
+        targetPos.current.x -= nx * overlap * 0.5;
+        targetPos.current.z -= nz * overlap * 0.5;
+      }
+    });
+    
+    // Friction
+    velocity.current.x *= 0.965;
+    velocity.current.z *= 0.965;
+    
+    meshRef.current.position.copy(position.current);
+    
+    const speed = Math.sqrt(velocity.current.x ** 2 + velocity.current.z ** 2);
+    if (speed > 0.001) {
+      meshRef.current.rotation.x += velocity.current.z * 5;
+      meshRef.current.rotation.z -= velocity.current.x * 5;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} position={SHOOTER_START} castShadow>
+      <sphereGeometry args={[MARBLE_RADIUS, 64, 64]} />
+      <meshStandardMaterial 
+        color="#1C2833"
+        metalness={0.8}
+        roughness={0.15}
+        envMapIntensity={1.2}
+      />
+    </mesh>
+  );
+};
+
+// Aim Arrow
+const AimArrow = ({ start, direction, power, visible }: { 
+  start: THREE.Vector3; direction: THREE.Vector3; power: number; visible: boolean; 
+}) => {
+  if (!visible || power < 0.05) return null;
+  
+  const length = power * 3;
+  const end = start.clone().add(direction.clone().multiplyScalar(length));
+  
+  return (
+    <group>
+      <Line 
+        points={[[start.x, 0.3, start.z], [end.x, 0.3, end.z]]} 
+        color="#ffffff" 
+        lineWidth={3}
+        transparent
+        opacity={0.8}
+      />
+      {[0.25, 0.5, 0.75].map((t, i) => (
+        power > t && (
+          <mesh key={i} position={[start.x + direction.x * length * t, 0.3, start.z + direction.z * length * t]}>
+            <sphereGeometry args={[0.05, 8, 8]} />
+            <meshBasicMaterial color={power > 0.7 ? '#ff4444' : power > 0.4 ? '#ffaa00' : '#44ff44'} />
+          </mesh>
+        )
+      ))}
+    </group>
+  );
+};
+
+// Drag Plane
+const DragPlane = ({ 
+  onDragStart, onDrag, onDragEnd, marblePosition, canInteract, setIsDragging
+}: {
+  onDragStart: (point: THREE.Vector3) => void;
+  onDrag: (point: THREE.Vector3) => void;
+  onDragEnd: (point: THREE.Vector3) => void;
+  marblePosition: THREE.Vector3;
+  canInteract: boolean;
+  setIsDragging: (dragging: boolean) => void;
+}) => {
+  const [localDragging, setLocalDragging] = useState(false);
+
+  const handlePointerDown = useCallback((e: any) => {
+    if (!canInteract) return;
+    e.stopPropagation();
+    
+    const point = e.point as THREE.Vector3;
+    const dx = point.x - marblePosition.x;
+    const dz = point.z - marblePosition.z;
+    
+    if (Math.sqrt(dx * dx + dz * dz) < 1) {
+      setLocalDragging(true);
+      setIsDragging(true);
+      onDragStart(point);
+    }
+  }, [canInteract, marblePosition, onDragStart, setIsDragging]);
+
+  const handlePointerMove = useCallback((e: any) => {
+    if (!localDragging) return;
+    onDrag(e.point as THREE.Vector3);
+  }, [localDragging, onDrag]);
+
+  const handlePointerUp = useCallback((e: any) => {
+    if (!localDragging) return;
+    setLocalDragging(false);
+    setIsDragging(false);
+    onDragEnd(e.point as THREE.Vector3);
+  }, [localDragging, onDragEnd, setIsDragging]);
+
+  return (
+    <mesh 
+      rotation={[-Math.PI / 2, 0, 0]} 
+      position={[0, 0.02, 0]}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
+      <planeGeometry args={[30, 30]} />
+      <meshBasicMaterial visible={false} />
+    </mesh>
+  );
+};
+
+// Game Scene
+const GameScene = ({ 
+  marblePosition,
+  velocity,
+  targetPositions,
+  targetVelocities,
+  onShoot,
+  onDragUpdate,
+  canShoot,
+  currentMarblePos
+}: {
+  marblePosition: React.MutableRefObject<THREE.Vector3>;
+  velocity: React.MutableRefObject<THREE.Vector3>;
+  targetPositions: React.MutableRefObject<THREE.Vector3>[];
+  targetVelocities: React.MutableRefObject<THREE.Vector3>[];
+  onShoot: (power: number, direction: THREE.Vector3) => void;
+  onDragUpdate: (power: number) => void;
+  canShoot: boolean;
+  currentMarblePos: THREE.Vector3;
+}) => {
+  const dragStartRef = useRef<THREE.Vector3 | null>(null);
+  const [aimDirection, setAimDirection] = useState<THREE.Vector3>(new THREE.Vector3());
+  const [aimPower, setAimPower] = useState(0);
+  const [showAim, setShowAim] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = useCallback(() => {
+    dragStartRef.current = marblePosition.current.clone();
+    setShowAim(true);
+  }, [marblePosition]);
+
+  const handleDrag = useCallback((point: THREE.Vector3) => {
+    if (!dragStartRef.current) return;
+    
+    const dx = dragStartRef.current.x - point.x;
+    const dz = dragStartRef.current.z - point.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const power = Math.min(distance / 3, 1);
+    const direction = new THREE.Vector3(dx, 0, dz).normalize();
+    
+    setAimDirection(direction);
+    setAimPower(power);
+    onDragUpdate(power);
+  }, [onDragUpdate]);
+
+  const handleDragEnd = useCallback((point: THREE.Vector3) => {
+    if (!dragStartRef.current) return;
+    
+    const dx = dragStartRef.current.x - point.x;
+    const dz = dragStartRef.current.z - point.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distance > 0.2) {
+      const power = Math.min(distance / 3, 1);
+      const direction = new THREE.Vector3(dx, 0, dz).normalize();
+      onShoot(power, direction);
+    }
+    
+    dragStartRef.current = null;
+    setShowAim(false);
+    setAimPower(0);
+    onDragUpdate(0);
+  }, [onShoot, onDragUpdate]);
+
+  return (
+    <>
+      <Sky distance={450000} sunPosition={[5, 15, 10]} inclination={0.6} azimuth={0.25} />
+      <ambientLight intensity={0.5} />
+      <directionalLight 
+        position={[8, 20, 8]} 
+        intensity={1.5} 
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-far={50}
+        shadow-camera-left={-15}
+        shadow-camera-right={15}
+        shadow-camera-top={15}
+        shadow-camera-bottom={-15}
+      />
+      <hemisphereLight args={['#87CEEB', '#C4A574', 0.4]} />
+
+      <SandGround />
+      <Boundaries />
+      <TriangleBoundary />
+
+      {/* Target Marbles */}
+      {TARGET_POSITIONS.map((pos, i) => (
+        <TargetMarble
+          key={i}
+          index={i}
+          initialPosition={pos}
+          color={TARGET_COLORS[i]}
+          velocity={targetVelocities[i]}
+          position={targetPositions[i]}
+        />
+      ))}
+
+      <AimArrow start={currentMarblePos} direction={aimDirection} power={aimPower} visible={showAim} />
+
+      <ShooterMarble 
+        position={marblePosition} 
+        velocity={velocity}
+        targetPositions={targetPositions}
+        targetVelocities={targetVelocities}
+      />
+
+      <DragPlane 
+        onDragStart={handleDragStart}
+        onDrag={handleDrag}
+        onDragEnd={handleDragEnd}
+        marblePosition={currentMarblePos}
+        canInteract={canShoot}
+        setIsDragging={setIsDragging}
+      />
+
+      <OrbitControls 
+        enablePan={false}
+        enableZoom={true}
+        enableRotate={!isDragging}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.5}
+        minDistance={8}
+        maxDistance={22}
+      />
+    </>
+  );
+};
+
+const Level2Page = () => {
+  const navigate = useNavigate();
+  const { marbleCount, recordShot, recordWin, recordLoss, completeLevel } = useGameStore();
+  
+  const marblePosition = useRef(new THREE.Vector3(...SHOOTER_START));
+  const velocity = useRef(new THREE.Vector3(0, 0, 0));
+  
+  const targetPositions = [
+    useRef(new THREE.Vector3(...TARGET_POSITIONS[0])),
+    useRef(new THREE.Vector3(...TARGET_POSITIONS[1])),
+    useRef(new THREE.Vector3(...TARGET_POSITIONS[2])),
+  ];
+  
+  const targetVelocities = [
+    useRef(new THREE.Vector3(0, 0, 0)),
+    useRef(new THREE.Vector3(0, 0, 0)),
+    useRef(new THREE.Vector3(0, 0, 0)),
+  ];
+  
+  const [power, setPower] = useState(0);
+  const [shots, setShots] = useState(0);
+  const [isMoving, setIsMoving] = useState(false);
+  const [showResult, setShowResult] = useState(false);
+  const [isWin, setIsWin] = useState(false);
+  const [hasEntered, setHasEntered] = useState(false);
+  const [currentMarblePos, setCurrentMarblePos] = useState(new THREE.Vector3(...SHOOTER_START));
+
+  // Check if player has enough marbles
+  useEffect(() => {
+    if (marbleCount < 1 && !hasEntered) {
+      navigate('/');
+    }
+  }, [marbleCount, hasEntered, navigate]);
+
+  const checkGameState = useCallback(() => {
+    const shooterInside = isInsideTriangle(marblePosition.current.x, marblePosition.current.z);
+    
+    const targetsOutside = targetPositions.every(tp => 
+      !isInsideTriangle(tp.current.x, tp.current.z)
+    );
+    
+    if (targetsOutside && !shooterInside) {
+      // WIN: All targets outside, shooter outside
+      setIsWin(true);
+      setShowResult(true);
+      recordWin(3);
+      completeLevel(2);
+    } else if (shooterInside) {
+      // LOSE: Shooter inside triangle
+      setIsWin(false);
+      setShowResult(true);
+      recordLoss(1);
+    }
+  }, [recordWin, recordLoss, completeLevel, targetPositions]);
+
+  useEffect(() => {
+    if (!isMoving) return;
+    
+    const checkInterval = setInterval(() => {
+      const shooterSpeed = Math.sqrt(velocity.current.x ** 2 + velocity.current.z ** 2);
+      const allStopped = targetVelocities.every(tv => 
+        Math.sqrt(tv.current.x ** 2 + tv.current.z ** 2) < 0.002
+      );
+      
+      setCurrentMarblePos(marblePosition.current.clone());
+      
+      if (shooterSpeed < 0.002 && allStopped) {
+        velocity.current.set(0, 0, 0);
+        targetVelocities.forEach(tv => tv.current.set(0, 0, 0));
+        setIsMoving(false);
+        checkGameState();
+      }
+    }, 50);
+
+    return () => clearInterval(checkInterval);
+  }, [isMoving, checkGameState, targetVelocities]);
+
+  const handleShoot = useCallback((shootPower: number, direction: THREE.Vector3) => {
+    if (!hasEntered) {
+      setHasEntered(true);
+    }
+    
+    const force = shootPower * 0.3;
+    velocity.current.set(direction.x * force, 0, direction.z * force);
+    setIsMoving(true);
+    setShots(s => s + 1);
+    recordShot();
+  }, [recordShot, hasEntered]);
+
+  const resetGame = useCallback(() => {
+    marblePosition.current.set(...SHOOTER_START);
+    velocity.current.set(0, 0, 0);
+    
+    TARGET_POSITIONS.forEach((pos, i) => {
+      targetPositions[i].current.set(...pos);
+      targetVelocities[i].current.set(0, 0, 0);
+    });
+    
+    setCurrentMarblePos(new THREE.Vector3(...SHOOTER_START));
+    setShots(0);
+    setIsMoving(false);
+    setShowResult(false);
+    setIsWin(false);
+    setHasEntered(false);
+  }, [targetPositions, targetVelocities]);
+
+  return (
+    <Layout>
+      <div className="h-[calc(100vh-180px)] min-h-[500px] relative">
+        {/* Header */}
+        <div className="absolute top-0 left-0 right-0 z-10 flex justify-between items-center p-4">
+          <Link to="/">
+            <Button variant="outline" size="sm" className="bg-card/90 backdrop-blur">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          
+          <div className="bg-card/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg border border-border">
+            <h2 className="font-bold text-foreground">Level 2: Triangle Formation</h2>
+            <p className="text-sm text-muted-foreground">Shots: {shots} | Risk: 1 marble</p>
+          </div>
+          
+          <Button variant="outline" size="sm" onClick={resetGame} className="bg-card/90 backdrop-blur">
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Reset
+          </Button>
+        </div>
+
+        {/* Instructions */}
+        <div className="absolute bottom-4 left-4 z-10 bg-card/90 backdrop-blur p-4 rounded-lg max-w-xs border border-border shadow-lg">
+          <h3 className="font-semibold text-foreground mb-2">How to Win:</h3>
+          <ol className="text-sm text-muted-foreground space-y-1">
+            <li>Knock all 3 marbles outside the triangle</li>
+            <li>Your shooter must stay outside too!</li>
+            <li>Win +3 marbles, Lose -1 marble</li>
+          </ol>
+        </div>
+
+        <PowerMeter power={power} visible={power > 0} />
+
+        <Canvas 
+          shadows 
+          camera={{ position: [0, 14, 12], fov: 50 }}
+          gl={{ antialias: true }}
+        >
+          <GameScene 
+            marblePosition={marblePosition}
+            velocity={velocity}
+            targetPositions={targetPositions}
+            targetVelocities={targetVelocities}
+            onShoot={handleShoot}
+            onDragUpdate={setPower}
+            canShoot={!isMoving && !showResult}
+            currentMarblePos={currentMarblePos}
+          />
+        </Canvas>
+
+        <GameResult 
+          isOpen={showResult}
+          isWin={isWin}
+          marblesChange={isWin ? 3 : -1}
+          onPlayAgain={resetGame}
+          levelName="Level 2: Triangle Formation"
+        />
+      </div>
+    </Layout>
+  );
+};
+
+export default Level2Page;
+
+================================================================================
+GAME MECHANICS SUMMARY (For SwiftUI Conversion)
+================================================================================
+
+## Physics Constants
+- Friction coefficient: 0.965 (per frame)
+- Wall bounce restitution: 0.6
+- Collision restitution: 0.85
+- Minimum velocity threshold: 0.002
+- Marble radius: 0.2
+
+## Drag-to-Shoot Mechanics
+1. Click/tap near the marble (within 1 unit radius)
+2. Drag backwards - distance determines power (max at 3 units = power 1.0)
+3. Direction is inverted (drag back to shoot forward)
+4. Release to shoot with force = power * 0.25 (Level 1) or power * 0.3 (Level 2)
+
+## Collision Detection
+- Circle-circle collision using distance formula
+- Elastic collision with momentum transfer
+- Separate overlapping marbles after collision
+
+## Win/Lose Conditions
+- Level 1: Marble falls into hole (distance < HOLE_RADIUS * 0.7)
+- Level 2: All 3 target marbles outside triangle AND shooter outside = WIN
+- Level 2: Shooter lands inside triangle = LOSE
+
+## Triangle Point-in-Triangle Test
+Uses sign test (cross product) method:
+- Calculate sign for each edge
+- If all same sign = inside, mixed signs = outside
+
+## 3D Scene Elements
+- Sand ground with procedural texture
+- Wooden boundary walls
+- Sky environment
+- Directional + ambient + hemisphere lighting
+- Shadow mapping
+
+================================================================================
+END OF EXPORT
+================================================================================

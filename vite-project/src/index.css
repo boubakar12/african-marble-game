@@ -1,68 +1,186 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+/* African Marble Game Design System - Warm Sandy Aesthetic */
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
+@layer base {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    /* Sandy African Theme */
+    --background: 35 45% 92%;
+    --foreground: 25 50% 15%;
+
+    --card: 35 40% 96%;
+    --card-foreground: 25 50% 15%;
+
+    --popover: 35 40% 96%;
+    --popover-foreground: 25 50% 15%;
+
+    /* Warm Earth Tones */
+    --primary: 25 60% 35%;
+    --primary-foreground: 35 45% 95%;
+
+    --secondary: 35 35% 85%;
+    --secondary-foreground: 25 50% 20%;
+
+    --muted: 35 30% 88%;
+    --muted-foreground: 25 20% 45%;
+
+    --accent: 30 70% 50%;
+    --accent-foreground: 35 45% 98%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 30% 75%;
+    --input: 30 30% 80%;
+    --ring: 25 60% 40%;
+
+    --radius: 0.75rem;
+
+    /* Game-specific colors */
+    --sand: 35 40% 75%;
+    --sand-light: 35 45% 85%;
+    --sand-dark: 25 35% 55%;
+    --earth: 25 50% 30%;
+    --earth-light: 25 40% 45%;
+    
+    /* Level gradients */
+    --level-1-start: 120 40% 45%;
+    --level-1-end: 145 50% 35%;
+    --level-2-start: 210 60% 50%;
+    --level-2-end: 230 70% 40%;
+    --level-3-start: 270 50% 55%;
+    --level-3-end: 290 60% 40%;
+    
+    /* Marble colors */
+    --marble-shooter: 210 30% 25%;
+    --marble-red: 0 75% 55%;
+    --marble-green: 140 70% 45%;
+    --marble-blue: 210 80% 55%;
+    --marble-yellow: 45 90% 55%;
+    --marble-orange: 30 85% 55%;
+    --marble-purple: 280 60% 55%;
+    --marble-cyan: 180 70% 50%;
+    
+    /* Gold accent for wins */
+    --gold: 45 90% 50%;
+    --gold-light: 45 95% 65%;
   }
-  a:hover {
-    color: #747bff;
+
+  .dark {
+    --background: 25 30% 10%;
+    --foreground: 35 40% 90%;
+
+    --card: 25 25% 15%;
+    --card-foreground: 35 40% 90%;
+
+    --popover: 25 25% 15%;
+    --popover-foreground: 35 40% 90%;
+
+    --primary: 30 65% 55%;
+    --primary-foreground: 25 30% 10%;
+
+    --secondary: 25 25% 20%;
+    --secondary-foreground: 35 40% 90%;
+
+    --muted: 25 20% 18%;
+    --muted-foreground: 35 25% 60%;
+
+    --accent: 30 70% 55%;
+    --accent-foreground: 25 30% 10%;
+
+    --destructive: 0 65% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 25 20% 25%;
+    --input: 25 20% 25%;
+    --ring: 30 65% 55%;
+
+    --sand: 35 25% 35%;
+    --sand-light: 35 30% 45%;
+    --sand-dark: 25 25% 25%;
+    --earth: 25 40% 50%;
+    --earth-light: 25 35% 60%;
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+@layer base {
+  * {
+    @apply border-border;
   }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+}
+
+@layer components {
+  .african-pattern {
+    background-image: 
+      radial-gradient(circle at 25% 25%, hsl(var(--sand-light)) 2%, transparent 2%),
+      radial-gradient(circle at 75% 75%, hsl(var(--sand-dark) / 0.3) 2%, transparent 2%);
+    background-size: 20px 20px;
+  }
+  
+  .sand-texture {
+    background: 
+      linear-gradient(135deg, hsl(var(--sand)) 0%, hsl(var(--sand-light)) 50%, hsl(var(--sand)) 100%);
+  }
+  
+  .level-card-1 {
+    background: linear-gradient(135deg, hsl(var(--level-1-start)) 0%, hsl(var(--level-1-end)) 100%);
+  }
+  
+  .level-card-2 {
+    background: linear-gradient(135deg, hsl(var(--level-2-start)) 0%, hsl(var(--level-2-end)) 100%);
+  }
+  
+  .level-card-3 {
+    background: linear-gradient(135deg, hsl(var(--level-3-start)) 0%, hsl(var(--level-3-end)) 100%);
+  }
+  
+  .marble-glow {
+    box-shadow: 
+      0 0 20px hsl(var(--gold) / 0.5),
+      0 0 40px hsl(var(--gold) / 0.3),
+      inset 0 0 20px hsl(var(--gold-light) / 0.2);
+  }
+  
+  .power-meter {
+    background: linear-gradient(to top, 
+      hsl(140 70% 45%) 0%, 
+      hsl(45 90% 50%) 50%, 
+      hsl(0 75% 50%) 100%
+    );
+  }
+}
+
+@layer utilities {
+  .text-shadow-gold {
+    text-shadow: 0 2px 10px hsl(var(--gold) / 0.5);
+  }
+  
+  .animate-bounce-slow {
+    animation: bounce 2s infinite;
+  }
+  
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px hsl(var(--gold) / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px hsl(var(--gold) / 0.8);
+  }
+}
+
+@keyframes marble-roll {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
